@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IMG2PDF</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #f0f2f5;
+      margin: 0;
+      padding: 20px 10px;
+      display: flex;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .container {
+      background: white;
+      max-width: 450px;
+      width: 95vw;
+      border-radius: 15px;
+      box-shadow: 0 4px 12px rgb(0 0 0 / 0.1);
+      padding: 20px 25px 30px 25px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      margin-bottom: 20px;
+      color: #222;
+      font-weight: 700;
+      text-align: center;
+    }
+    .buttons {
+      display: flex;
+      gap: 12px;
+      width: 100%;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    button {
+      background-color: #1976d2;
+      border: none;
+      color: white;
+      padding: 12px 20px;
+      font-size: 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      flex: 1 1 120px;
+      max-width: 140px;
+      transition: background-color 0.2s ease;
+      user-select: none;
+    }
+    button:disabled {
+      background-color: #a0a0a0;
+      cursor: not-allowed;
+    }
+    button:hover:not(:disabled) {
+      background-color: #135ba1;
+    }
+    input[type="file"] {
+      display: none;
+    }
+    .previews {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      max-height: 60vh;
+      overflow-y: auto;
+      padding-right: 6px;
+    }
+    .preview-card {
+      position: relative;
+      background: #fafafa;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgb(0 0 0 / 0.1);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      transition: box-shadow 0.2s;
+      outline: none;
+    }
+    .preview-card.dragging {
+      opacity: 0.5;
+      box-shadow: 0 0 12px #1976d2;
+    }
+    .preview-card.drag-over {
+      box-shadow: 0 0 0 3px #1976d2;
+    }
+    .preview-number {
+      position: absolute;
+      top: 10px;
+      left: 12px;
+      background-color: #1976d2;
+      color: white;
+      font-weight: 700;
+      font-size: 1rem;
+      padding: 3px 9px;
+      border-radius: 7px;
+      opacity: 0.9;
+      user-select: none;
+      z-index: 2;
+    }
+    .preview-card img {
+      width: 100%;
+      max-width: 350px;
+      border-radius: 10px;
+      box-shadow: 0 1px 6px rgb(0 0 0 / 0.15);
+      margin-bottom: 10px;
+      object-fit: contain;
+      user-select: none;
+      pointer-events: none;
+    }
+    .delete-btn {
+      position: absolute;
+      top: 10px;
+      right: 12px;
+      background-color: #e53935;
+      border: none;
+      color: white;
+      padding: 4px 10px;
+      font-size: 0.9rem;
+      border-radius: 50%;
+      cursor: pointer;
+      transition: background-color 0.2s;
+      user-select: none;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 2;
+      box-shadow: 0 1px 4px #0002;
+    }
+    .delete-btn:hover {
+      background-color: #b71c1c;
+    }
+    .drag-handle {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #e0e0e0;
+      color: #555;
+      font-size: 1.1rem;
+      border-radius: 6px;
+      padding: 2px 14px;
+      cursor: grab;
+      user-select: none;
+      opacity: 0.85;
+      letter-spacing: 1px;
+      z-index: 1;
+    }
+    @media (max-width: 480px) {
+      .buttons {
+        gap: 8px;
+      }
+      button {
+        max-width: 100%;
+        flex-grow: 1;
+      }
+      .preview-card img {
+        max-width: 90vw;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📄 IMG2PDF</h1>
+    <div class="buttons">
+      <button id="captureBtn" title="Capture photo from camera">📷 Capture from Camera</button>
+      <button id="uploadBtn" title="Upload photos from gallery">🖼️ Upload from Gallery</button>
+      <button id="savePdfBtn" disabled title="Save all photos as PDF">⬇️ Save as PDF</button>
+    </div>
+
+    <!-- Hidden file inputs -->
+    <input type="file" id="captureInput" accept="image/*" capture="environment" multiple />
+    <input type="file" id="uploadInput" accept="image/*" multiple />
+
+    <div class="previews" id="previews"></div>
+  </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script>
+    const captureBtn = document.getElementById('captureBtn');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const savePdfBtn = document.getElementById('savePdfBtn');
+    const captureInput = document.getElementById('captureInput');
+    const uploadInput = document.getElementById('uploadInput');
+    const previews = document.getElementById('previews');
+
+    let images = [];
+
+    let dragSrcIdx = null;
+
+    function renderPreviews() {
+      previews.innerHTML = '';
+      images.forEach((imgObj, idx) => {
+        const card = document.createElement('div');
+        card.className = 'preview-card';
+        card.setAttribute('draggable', 'true');
+        card.setAttribute('tabindex', '0');
+        card.dataset.idx = idx;
+
+        card.ondragstart = (e) => {
+          dragSrcIdx = idx;
+          card.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+        };
+        card.ondragend = () => {
+          dragSrcIdx = null;
+          card.classList.remove('dragging');
+          document.querySelectorAll('.preview-card.drag-over').forEach(el => el.classList.remove('drag-over'));
+        };
+        card.ondragover = (e) => {
+          e.preventDefault();
+          if (dragSrcIdx !== null && dragSrcIdx !== idx) {
+            card.classList.add('drag-over');
+          }
+        };
+        card.ondragleave = () => {
+          card.classList.remove('drag-over');
+        };
+        card.ondrop = (e) => {
+          e.preventDefault();
+          card.classList.remove('drag-over');
+          if (dragSrcIdx !== null && dragSrcIdx !== idx) {
+            const moved = images.splice(dragSrcIdx, 1)[0];
+            images.splice(idx, 0, moved);
+            renderPreviews();
+          }
+        };
+
+        const number = document.createElement('div');
+        number.className = 'preview-number';
+        number.textContent = idx + 1;
+
+        const img = document.createElement('img');
+        img.src = imgObj.src;
+        img.alt = `Document page ${idx + 1}`;
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'delete-btn';
+        deleteBtn.title = 'Delete this photo';
+        deleteBtn.innerHTML = '✕';
+        deleteBtn.onclick = (ev) => {
+          ev.stopPropagation();
+          images.splice(idx, 1);
+          renderPreviews();
+          updateSaveButton();
+        };
+
+        const dragHandle = document.createElement('div');
+        dragHandle.className = 'drag-handle';
+        dragHandle.innerHTML = '↕️ Drag';
+        dragHandle.onmousedown = (e) => {
+          e.preventDefault();
+          card.dispatchEvent(new DragEvent('dragstart', {bubbles:true, cancelable:true}));
+        };
+
+        card.appendChild(number);
+        card.appendChild(img);
+        card.appendChild(deleteBtn);
+        card.appendChild(dragHandle);
+        previews.appendChild(card);
+      });
+      updateSaveButton();
+    }
+
+    function updateSaveButton() {
+      savePdfBtn.disabled = images.length === 0;
+    }
+
+    function handleFiles(files) {
+      const fileArray = Array.from(files);
+      let loadedCount = 0;
+      fileArray.forEach(file => {
+        if (file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onload = (e) => {
+            images.push({ src: e.target.result, name: file.name });
+            loadedCount++;
+            if (loadedCount === fileArray.length) {
+              renderPreviews();
+            }
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+    }
+
+    captureBtn.addEventListener('click', () => captureInput.click());
+    uploadBtn.addEventListener('click', () => uploadInput.click());
+
+    captureInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) {
+        handleFiles(e.target.files);
+        captureInput.value = '';
+      }
+    });
+    uploadInput.addEventListener('change', (e) => {
+      if (e.target.files.length > 0) {
+        handleFiles(e.target.files);
+        uploadInput.value = '';
+      }
+    });
+
+    savePdfBtn.addEventListener('click', () => {
+      if (images.length === 0) return;
+
+      const { jsPDF } = window.jspdf;
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      });
+      const pageWidth = 210;
+      const pageHeight = 297;
+
+      let addImageToPDF = (imgData, idx, callback) => {
+        const img = new Image();
+        img.onload = () => {
+          let imgWidth = img.width;
+          let imgHeight = img.height;
+          const ratio = Math.min(pageWidth / imgWidth, pageHeight / imgHeight);
+          imgWidth *= ratio;
+          imgHeight *= ratio;
+          const x = (pageWidth - imgWidth) / 2;
+          const y = (pageHeight - imgHeight) / 2;
+
+          if (idx !== 0) pdf.addPage();
+          pdf.addImage(imgData, 'JPEG', x, y, imgWidth, imgHeight);
+          callback();
+        };
+        img.src = imgData;
+      };
+
+      let currentIndex = 0;
+      function next() {
+        if (currentIndex < images.length) {
+          addImageToPDF(images[currentIndex].src, currentIndex, () => {
+            currentIndex++;
+            next();
+          });
+        } else {
+          pdf.save('scanned-documents.pdf');
+        }
+      }
+      next();
+    });
+
+    updateSaveButton();
+  </script>
+</body>
+</html>
